@@ -51,13 +51,21 @@ DEPOSIT
 WITHDRAW
 ```
 
+## Конкурентность
+
+Атомарный `UPDATE` в PostgreSQL исключает гонку read-modify-write и потерю обновлений.
+При `WITHDRAW` достаточность средств проверяется в том же `UPDATE`.
+Поэтому баланс кошелька не может стать отрицательным.
+
 ## Тесты
+
+Unit-тесты запускаются командой:
 
 ```bash
 go test ./...
 ```
 
-Integration-тесты:
+Integration-тесты проверяют работу с реальным PostgreSQL, включая конкурентные `Deposit` и `Withdraw`, и требуют запущенного Docker Compose:
 
 ```powershell
 $env:TEST_DATABASE_URL = 'postgres://wallet:wallet@localhost:15432/wallet?sslmode=disable'

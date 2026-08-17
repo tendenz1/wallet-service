@@ -4,9 +4,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,23 +60,21 @@ func TestPostgresRepositoryConcurrentDeposits(t *testing.T) {
 		amount     = 100
 	)
 	start := make(chan struct{})
-	errorsChannel := make(chan error, operations)
+	results := make(chan error, operations)
 	var waitGroup sync.WaitGroup
-	waitGroup.Add(operations)
 
 	for range operations {
-		go func() {
-			defer waitGroup.Done()
+		waitGroup.Go(func() {
 			<-start
 			_, err := repository.Deposit(ctx, walletID, amount)
-			errorsChannel <- err
-		}()
+			results <- err
+		})
 	}
 	close(start)
 	waitGroup.Wait()
-	close(errorsChannel)
+	close(results)
 
-	for err := range errorsChannel {
+	for err := range results {
 		require.NoError(t, err)
 	}
 	balance, err := repository.GetBalance(ctx, walletID)
@@ -93,33 +91,33 @@ func TestPostgresRepositoryConcurrentWithdrawals(t *testing.T) {
 
 	const operations = 1000
 	start := make(chan struct{})
-	errorsChannel := make(chan error, operations)
+	results := make(chan error, operations)
 	var waitGroup sync.WaitGroup
-	var successful atomic.Int64
-	waitGroup.Add(operations)
 
 	for range operations {
-		go func() {
-			defer waitGroup.Done()
+		waitGroup.Go(func() {
 			<-start
 			_, err := repository.Withdraw(ctx, walletID, 1)
-			if err == nil {
-				successful.Add(1)
-				return
-			}
-			errorsChannel <- err
-		}()
+			results <- err
+		})
 	}
 	close(start)
 	waitGroup.Wait()
-	close(errorsChannel)
+	close(results)
 
+	successful := 0
 	insufficient := 0
-	for err := range errorsChannel {
-		require.ErrorIs(t, err, model.ErrInsufficientFunds)
-		insufficient++
+	for err := range results {
+		switch {
+		case err == nil:
+			successful++
+		case errors.Is(err, model.ErrInsufficientFunds):
+			insufficient++
+		default:
+			require.NoError(t, err)
+		}
 	}
-	require.Equal(t, int64(500), successful.Load())
+	require.Equal(t, 500, successful)
 	require.Equal(t, 500, insufficient)
 	balance, err := repository.GetBalance(ctx, walletID)
 	require.NoError(t, err)
